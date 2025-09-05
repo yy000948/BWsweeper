@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>黑白扫雷</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Microsoft YaHei', Arial;
+            background: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: url('https://images.unsplash.com/photo-1557683316-973673baf926?w=1920&h=1080&fit=crop') no-repeat center center fixed;
+            background-size: cover;
+            min-height: 100vh
+        }
+
+        /* 游戏说明卡片 */
+        .info-card {
+            max-width: 600px;
+            margin: 8px 0 12px;
+            padding: 10px 14px;
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            font-size: 16px;
+            line-height: 1.45;
+            color: #856404;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, .1);
+        }
+
+        .game-container {
+            background: #c0c0c0;
+            border: 3px outset;
+            padding: 10px
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #c0c0c0;
+            border: 2px inset;
+            padding: 5px;
+            margin-bottom: 10px;
+            height: 40px
+        }
+
+        .counter {
+            background: #000;
+            color: red;
+            font-family: 'Times New Roman', Times, serif;
+            font-size: 20px;
+            min-width: 60px;
+            text-align: right;
+            padding: 2px 5px;
+            border: 2px inset
+        }
+
+        .face-button {
+            width: 40px;
+            height: 40px;
+            background: #c0c0c0;
+            border: 3px outset;
+            font-size: 24px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center
+        }
+
+        .face-button:active {
+            border: 3px inset
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(8, 30px);
+            grid-template-rows: repeat(8, 30px);
+            gap: 1px;
+            background: #808080;
+            border: 3px inset
+        }
+
+        .cell {
+            width: 30px;
+            height: 30px;
+            background: #b4ae73;
+            border: 3px outset;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
+            cursor: pointer;
+            position: relative
+        }
+
+        .cell.revealed {
+            border: 3px inset;
+            background: #e0e0e0
+        }
+
+        .number-1 {
+            color: #00f
+        }
+
+        .number-2 {
+            color: #080
+        }
+
+        .number-3 {
+            color: #f00
+        }
+
+        .number-4 {
+            color: #808
+        }
+
+        .number-5 {
+            color: #800
+        }
+
+        .number-6 {
+            color: #088
+        }
+
+        .number-7 {
+            color: #000
+        }
+
+        .number-8 {
+            color: #888
+        }
+
+        .piece {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 20px;
+            line-height: 1;
+            z-index: 5
+        }
+
+        .cell.ai-thinking {
+            opacity: .6;
+            pointer-events: none
+        }
+
+        .hint {
+            background: #77de7b !important;
+        }
+
+        /* 人类回合 */
+        .ai-hint {
+            background: #77de7b !important;
+        }
+
+        /* AI  回合 */
+        #aiFirst {
+            margin-left: 10px
+        }
+    </style>
+</head>
+
+<body>
+    <h1 style="color: white;">黑白扫雷</h1>
+    <div class="game-container">
+        <div class="header">
+            <div class="counter" id="mine-counter">008</div>
+            <button class="face-button" id="face">😊</button>
+            <div class="counter" id="aiFirst">AI模式</div>
+        </div>
+        <div class="grid" id="grid"></div>
+    </div>
+    <br>
+    <div class="info-card">
+        <strong>
+            8x8棋盘，随机8个雷。按扫雷规则，黑白(AI)双方轮流落子，落子位置在上一个棋子周围1x1范围内(绿色标记)。
+            碰到雷时，周围1x1范围内的对方棋子移除。当一方欠行时，按黑白棋规则继续落子(绿色标记)，最终棋子多的一方(或对方欠行)获胜。</strong>
+    </div>
+
+    <script>
+        class Minesweeper {
+            constructor(w, h, m) {
+                this.w = w; this.h = h; this.m = m;
+                this.grid = []; this.rev = []; this.pieces = [];
+                this.firstClick = true; this.time = 0; this.tid = null;
+                this.turn = 1;        // 1=人类(黑) 2=AI(白)
+                this.lastX = -1; this.lastY = -1;
+                this.bombX = -1; this.bombY = -1;
+                this.blackWhiteMode = false; this.gameOver = false;
+                this.aiFirst = false; this.aiTurn = false;
+                this.init();
+            }
+
+            init() {
+                this.aiFirst = document.getElementById('aiFirst').checked;
+                this.turn = this.aiFirst ? 2 : 1;
+                this.createGrid();
+                this.render();
+                this.updateMineCounter();
+                document.getElementById('face').onclick = () => location.reload();
+                if (this.turn === 2) setTimeout(() => this.aiMove(), 600);
+            }
+
+            reset() {
+                clearInterval(this.tid); this.tid = null;
+                this.grid = []; this.rev = []; this.pieces = [];
+                this.firstClick = true; this.time = 0; this.turn = this.aiFirst ? 2 : 1;
+                this.lastX = -1; this.lastY = -1; this.bombX = -1; this.bombY = -1;
+                this.blackWhiteMode = false; this.gameOver = false; this.aiTurn = false;
+                document.getElementById('timer').textContent = '000';
+                document.getElementById('face').textContent = '😊';
+                this.createGrid(); this.render(); this.updateMineCounter();
+                if (this.turn === 2) setTimeout(() => this.aiMove(), 600);
+            }
+
+            createGrid() {
+                const g = document.getElementById('grid'); g.innerHTML = '';
+                for (let y = 0; y < this.h; y++) {
+                    this.grid[y] = []; this.rev[y] = []; this.pieces[y] = [];
+                    for (let x = 0; x < this.w; x++) {
+                        this.grid[y][x] = 0; this.rev[y][x] = false; this.pieces[y][x] = 0;
+                        const c = document.createElement('div'); c.className = 'cell';
+                        c.dataset.x = x; c.dataset.y = y; c.onclick = (e) => this.handleClick(e);
+                        g.appendChild(c);
+                    }
+                }
+            }
+
+            updateHighlight() {
+                // 先清旧高亮
+                document.querySelectorAll('.cell').forEach(c => c.classList.remove('hint', 'ai-hint'));
+
+                if (this.gameOver) return;
+
+                // 1. 开局中心 4 格高亮（仅第一次落子前）
+                if (!this.blackWhiteMode && this.lastX === -1) {
+                    [3, 4].forEach(y => [3, 4].forEach(x => {
+                        const idx = y * this.w + x;
+                        document.querySelectorAll('.cell')[idx].classList.add(this.aiTurn ? 'ai-hint' : 'hint');
+                    }));
+                    return; // 开局阶段只高亮中心 4 格，后续逻辑跳过
+                }
+
+                // 2. 扫雷阶段：9 宫格空位高亮
+                if (!this.blackWhiteMode) {
+                    const [lx, ly] = [this.lastX, this.lastY];
+                    if (lx !== -1) {
+                        for (let dy = -1; dy <= 1; dy++) {
+                            for (let dx = -1; dx <= 1; dx++) {
+                                const nx = lx + dx, ny = ly + dy;
+                                if (nx < 0 || nx >= this.w || ny < 0 || ny >= this.h) continue;
+                                if (this.pieces[ny][nx] === 0) {
+                                    const cell = document.querySelectorAll('.cell')[ny * this.w + nx];
+                                    cell.classList.add(this.aiTurn ? 'ai-hint' : 'hint');
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 3. 黑白棋阶段：全局可翻转合法步高亮
+                else {
+                    for (let y = 0; y < this.h; y++) {
+                        for (let x = 0; x < this.w; x++) {
+                            if (this.pieces[y][x] === 0 && this.wouldFlip(x, y, this.turn)) {
+                                const cell = document.querySelectorAll('.cell')[y * this.w + x];
+                                cell.classList.add(this.aiTurn ? 'ai-hint' : 'hint');
+                            }
+                        }
+                    }
+                }
+            }
+
+            hasSweepMove() {
+                const [lx, ly] = [this.lastX, this.lastY];
+                if (lx === -1) return true; // 首张四格
+                for (let dy = -1; dy <= 1; dy++)
+                    for (let dx = -1; dx <= 1; dx++) {
+                        const nx = lx + dx, ny = ly + dy;
+                        if (nx < 0 || nx >= this.w || ny < 0 || ny >= this.h) continue;
+                        if (this.pieces[ny][nx] === 0) return true;
+                    }
+                return false;
+            }
+
+            render() {
+                for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) this.renderCell(x, y);
+                document.getElementById('grid').classList.toggle('ai-thinking', this.aiTurn);
+                this.updateHighlight();
+            }
+
+            clearHighlight() {
+                document.querySelectorAll('.cell').forEach(c => {
+                    c.classList.remove('hint', 'ai-hint');
+                });
+            }
+
+            renderCell(x, y) {
+                const idx = y * this.w + x;
+                const c = document.querySelectorAll('.cell')[idx];
+                c.className = this.rev[y][x] ? 'cell revealed' : 'cell';
+                c.innerHTML = '';
+
+                // 1. 炸弹背景：扫雷阶段爆炸闪红 1 秒；黑白棋阶段不红
+                if (this.grid[y][x] === -1 && !this.blackWhiteMode && x === this.bombX && y === this.bombY) {
+                    c.style.background = '#f00';
+                } else {
+                    c.style.background = '';
+                }
+
+                // 2. 棋子
+                if (this.pieces[y][x] !== 0) {
+                    const piece = document.createElement('span');
+                    piece.className = 'piece';
+                    piece.textContent = this.pieces[y][x] === 1 ? '⚫' : '⚪';
+                    c.appendChild(piece);
+                }
+
+                // 3. 绿色数字（最前层）
+                if (this.rev[y][x] && this.grid[y][x] > 0) {
+                    const num = document.createElement('span');
+                    Object.assign(num.style, {
+                        position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+                        fontSize: '14px', fontWeight: 'bold', color: '#f00', zIndex: '10', pointerEvents: 'none'
+                    });
+                    num.textContent = this.grid[y][x];
+                    c.appendChild(num);
+                }
+
+            }
+
+            handleClick(e) {
+                if (this.gameOver || this.aiTurn) return;
+                const x = +e.target.dataset.x, y = +e.target.dataset.y;
+                if (this.blackWhiteMode) {
+                    if (!this.wouldFlip(x, y, this.turn)) return;
+                    this.humanMove(x, y);
+                } else {
+                    if (!this.canPlace(x, y)) return;
+                    this.humanMove(x, y);
+                }
+            }
+
+            humanMove(x, y) {
+                if (this.blackWhiteMode) {
+                    this.placePiece(x, y, this.turn);
+                } else {
+                    if (this.firstClick) { this.placeMines(x, y); this.firstClick = false; }
+                    this.reveal(x, y);
+                    if (this.grid[y][x] === -1) { this.bombX = x; this.bombY = y; this.explodeAt(x, y); }
+                    this.togglePiece(x, y);
+                }
+                this.turn = 3 - this.turn; this.render(); this.updateMineCounter();
+                if (!this.gameOver) setTimeout(() => this.aiMove(), 600);
+
+                this.clearHighlight();
+                if (this.blackWhiteMode && !this.hasLegalMove(this.turn)) { this.endGame(); return; }
+                if (!this.blackWhiteMode && !this.hasSweepMove()) this.enterBlackWhiteMode();
+                this.render();          // render 内部会重新打高亮
+            }
+
+            aiMove() {
+                this.aiTurn = true;
+                if (this.blackWhiteMode) {
+                    if (!this.hasLegalMove(this.turn)) {          // AI 回合无子可落 → 判负
+                        this.endGame(); this.aiTurn = false; return;
+                    }
+                    const [x, y] = this.getBestMove(2);
+                    if (x !== -1) this.placePiece(x, y, 2);
+                }
+                else {
+                    const [x, y] = this.getBestSweepMove();
+                    if (x !== -1) {
+                        if (this.firstClick) { this.placeMines(x, y); this.firstClick = false; }
+                        this.reveal(x, y);
+                        if (this.grid[y][x] === -1) { this.bombX = x; this.bombY = y; this.explodeAt(x, y); }
+                        this.togglePiece(x, y);
+                    } else this.enterBlackWhiteMode();
+                }
+                this.turn = 3 - this.turn; this.render(); this.updateMineCounter();
+                this.clearHighlight();
+                this.render();
+                // 扫雷阶段且无处落子 → 立即切换，当前玩家继续先手
+                if (!this.blackWhiteMode && !this.hasSweepMove()) this.enterBlackWhiteMode();
+                this.aiTurn = false;
+                if (this.blackWhiteMode && !this.gameOver && !this.hasLegalMove(1)) this.aiMove();
+            }
+
+            /* ========== 扫雷阶段：优先选周围已翻开且数字大的空格，降低踩雷率 ========== */
+            getBestSweepMove() {
+                const [lx, ly] = [this.lastX, this.lastY];
+                const pool = [];                       // 9 宫格内可落子空位
+                if (lx !== -1) {
+                    for (let dy = -1; dy <= 1; dy++)
+                        for (let dx = -1; dx <= 1; dx++) {
+                            const nx = lx + dx, ny = ly + dy;
+                            if (nx < 0 || nx >= this.w || ny < 0 || ny >= this.h) continue;
+                            if (this.pieces[ny][nx] === 0) pool.push([nx, ny]);
+                        }
+                }
+                if (pool.length) {                     // 按“已翻开且数字大”排序
+                    pool.sort((a, b) => {
+                        const va = this.rev[a[1]][a[0]] ? this.grid[a[1]][a[0]] : -1;
+                        const vb = this.rev[b[1]][b[0]] ? this.grid[b[1]][b[0]] : -1;
+                        return vb - va;                // 数字大的放前面
+                    });
+                    return pool[0];                    // 返回最佳
+                }
+                // 9 宫格无子可下 → 直接进入黑白棋阶段
+                this.enterBlackWhiteMode();
+                return [-1, -1];
+            }
+
+            /* ========== 黑白棋阶段：minimax + 静态估值 + Alpha-Beta ========== */
+            getBestMove(player) {
+                const t0 = performance.now();
+                const [x, y] = this.minimaxRoot(5, player, true);   // 深度 5 足够
+                //console.log(`AI思考 ${(performance.now() - t0).toFixed(1)} ms`);
+                return [x, y];
+            }
+
+            minimaxRoot(depth, player, maximizing) {
+                let bestX = -1, bestY = -1, best = -Infinity;
+                for (let y = 0; y < this.h; y++)
+                    for (let x = 0; x < this.w; x++) {
+                        if (this.pieces[y][x] !== 0 || !this.wouldFlip(x, y, player)) continue;
+                        const clone = this.clonePieces();
+                        this.placePiece(x, y, player);
+                        const v = this.minimax(depth - 1, 3 - player, -Infinity, Infinity, false);
+                        this.pieces = clone;
+                        if (v > best) { best = v; bestX = x; bestY = y; }
+                    }
+                return [bestX, bestY];
+            }
+
+            minimax(depth, player, alpha, beta, maximizing) {
+                if (depth === 0 || this.isTerminal()) return this.evaluate();
+                if (maximizing) {
+                    let maxEval = -Infinity;
+                    for (let y = 0; y < this.h; y++)
+                        for (let x = 0; x < this.w; x++) {
+                            if (this.pieces[y][x] !== 0 || !this.wouldFlip(x, y, player)) continue;
+                            const clone = this.clonePieces();
+                            this.placePiece(x, y, player);
+                            const score = this.minimax(depth - 1, 3 - player, alpha, beta, false);
+                            this.pieces = clone;
+                            maxEval = Math.max(maxEval, score);
+                            alpha = Math.max(alpha, score);
+                            if (beta <= alpha) break;          // 剪枝
+                        }
+                    return maxEval;
+                } else {
+                    let minEval = Infinity;
+                    for (let y = 0; y < this.h; y++)
+                        for (let x = 0; x < this.w; x++) {
+                            if (this.pieces[y][x] !== 0 || !this.wouldFlip(x, y, player)) continue;
+                            const clone = this.clonePieces();
+                            this.placePiece(x, y, player);
+                            const score = this.minimax(depth - 1, 3 - player, alpha, beta, true);
+                            this.pieces = clone;
+                            minEval = Math.min(minEval, score);
+                            beta = Math.min(beta, score);
+                            if (beta <= alpha) break;          // 剪枝
+                        }
+                    return minEval;
+                }
+            }
+
+            isTerminal() {
+                return !this.hasLegalMove(1) && !this.hasLegalMove(2);
+            }
+
+            evaluate() {
+                // 静态估值：棋子差 + 角差 + 边差
+                let score = 0;
+                const corner = [[0, 0], [0, 7], [7, 0], [7, 7]];
+                const edge = [];
+                for (let i = 1; i <= 6; i++) edge.push([i, 0], [i, 7], [0, i], [7, i]);
+
+                // 1. 棋子差
+                for (let y = 0; y < this.h; y++)
+                    for (let x = 0; x < this.w; x++)
+                        score += this.pieces[y][x] === 2 ? 1 : this.pieces[y][x] === 1 ? -1 : 0;
+
+                // 2. 角
+                corner.forEach(([x, y]) => {
+                    if (this.pieces[y][x] === 2) score += 20;
+                    else if (this.pieces[y][x] === 1) score -= 20;
+                });
+
+                // 3. 边
+                edge.forEach(([x, y]) => {
+                    if (this.pieces[y][x] === 2) score += 5;
+                    else if (this.pieces[y][x] === 1) score -= 5;
+                });
+                return score;
+            }
+
+            clonePieces() {
+                return this.pieces.map(row => row.slice());
+            }
+
+            countFlips(x, y, player) {
+                if (this.pieces[y][x] !== 0) return 0;
+                const opp = 3 - player; let tot = 0;
+                const dirs = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+                for (const [dx, dy] of dirs) {
+                    let nx = x + dx, ny = y + dy, cnt = 0;
+                    while (nx >= 0 && nx < this.w && ny >= 0 && ny < this.h && this.pieces[ny][nx] === opp) { cnt++; nx += dx; ny += dy; }
+                    if (cnt && nx >= 0 && nx < this.w && ny >= 0 && ny < this.h && this.pieces[ny][nx] === player) tot += cnt;
+                } return tot;
+            }
+
+            placePiece(x, y, player) {
+                if (this.pieces[y][x] !== 0) return;
+                this.pieces[y][x] = player;
+                this.flipDiscs(x, y, player);
+                this.lastX = x; this.lastY = y;
+                if (!this.blackWhiteMode) this.updateHint();
+            }
+
+            placeMines(ex, ey) {
+                const set = new Set();
+                while (set.size < this.m) {
+                    const x = Math.floor(Math.random() * this.w), y = Math.floor(Math.random() * this.h);
+                    if ((x !== ex || y !== ey) && !set.has(`${x},${y}`)) { set.add(`${x},${y}`); this.grid[y][x] = -1; }
+                }
+                for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) {
+                    if (this.grid[y][x] === -1) continue; let cnt = 0;
+                    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+                        const ny = y + dy, nx = x + dx;
+                        if (ny >= 0 && ny < this.h && nx >= 0 && nx < this.w && this.grid[ny][nx] === -1) cnt++;
+                    } this.grid[y][x] = cnt;
+                }
+            }
+
+            reveal(x, y) {
+                if (x < 0 || x >= this.w || y < 0 || y >= this.h || this.rev[y][x]) return;
+                this.rev[y][x] = true;
+                if (this.grid[y][x] === -1) return;
+                if (this.grid[y][x] === 0) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) this.reveal(x + dx, y + dy);
+            }
+
+            explodeAt(cx, cy) {
+                const enemy = 3 - this.turn;
+                for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+                    const nx = cx + dx, ny = cy + dy;
+                    if (nx < 0 || nx >= this.w || ny < 0 || ny >= this.h) continue;
+                    if (this.pieces[ny][nx] === enemy) this.pieces[ny][nx] = 0;
+                }
+                const idx = cy * this.w + cx, bombCell = document.querySelectorAll('.cell')[idx];
+                bombCell.style.background = '#f00';
+                setTimeout(() => bombCell.style.background = '', 1000);
+            }
+
+            togglePiece(x, y) {
+                if (this.pieces[y][x] !== 0) return;
+                this.pieces[y][x] = this.turn; this.lastX = x; this.lastY = y;
+                if (!this.blackWhiteMode) this.updateHint();
+            }
+
+            updateMineCounter() {
+                let remain = this.m;
+                for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) if (this.rev[y][x] && this.grid[y][x] === -1) remain--;
+                document.getElementById('mine-counter').textContent = remain.toString().padStart(3, '0');
+            }
+
+            updateHint() { /* 原高亮代码，略 */ }
+
+            canPlace(x, y) {
+                if (this.blackWhiteMode) return true;
+                if (this.lastX === -1) return (x === 3 || x === 4) && (y === 3 || y === 4);
+                const dx = Math.abs(x - this.lastX), dy = Math.abs(y - this.lastY);
+                return dx <= 1 && dy <= 1 && !(dx === 0 && dy === 0);
+            }
+
+            wouldFlip(x, y, player) { return this.countFlips(x, y, player) > 0; }
+
+            hasLegalMove(player) {
+                for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) if (this.pieces[y][x] === 0 && this.wouldFlip(x, y, player)) return true;
+                return false;
+            }
+
+            flipDiscs(x, y, player) {
+                const opp = 3 - player;
+                const dirs = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+                for (const [dx, dy] of dirs) {
+                    let nx = x + dx, ny = y + dy, toFlip = [];
+                    while (nx >= 0 && nx < this.w && ny >= 0 && ny < this.h && this.pieces[ny][nx] === opp) { toFlip.push([nx, ny]); nx += dx; ny += dy; }
+                    if (nx >= 0 && nx < this.w && ny >= 0 && ny < this.h && this.pieces[ny][nx] === player && toFlip.length) toFlip.forEach(([tx, ty]) => this.pieces[ty][tx] = player);
+                }
+            }
+
+            enterBlackWhiteMode() {
+                this.blackWhiteMode = true;
+                document.getElementById('face').textContent = '♟️';
+                this.updateHighlight(); // ← 新增：立即显示第一步合法位置
+            }
+
+            endGame() {
+                this.gameOver = true;
+                const face = document.getElementById('face');
+
+                /* 黑白棋阶段：谁没步谁负（当前玩家已确定） */
+                if (this.blackWhiteMode) {
+                    const humanCan = this.hasLegalMove(1);
+                    const aiCan = this.hasLegalMove(2);
+
+                    if (!humanCan && aiCan) { face.textContent = 'AI win'; return; }
+                    if (humanCan && !aiCan) { face.textContent = 'You win'; return; }
+                }
+
+                /* 双方同时无子→ 比棋子数 */
+                let black = 0, white = 0;
+                for (let y = 0; y < this.h; y++)
+                    for (let x = 0; x < this.w; x++)
+                        this.pieces[y][x] === 1 ? black++ : this.pieces[y][x] === 2 ? white++ : 0;
+
+                if (black > white) face.textContent = 'You win';
+                else if (white > black) face.textContent = 'AI win';
+                else face.textContent = 'Draw';
+            }
+
+        }
+
+        new Minesweeper(8, 8, 8);
+
+    </script>
+</body>
+
+</html>
